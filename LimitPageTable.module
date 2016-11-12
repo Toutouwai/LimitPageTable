@@ -1,0 +1,114 @@
+<?php
+
+/**
+ *
+ * Limit Page Table
+ *
+ * @author Robin Sallis
+ *
+ * ProcessWire 3.x
+ * Copyright (C) 2011 by Ryan Cramer
+ * Licensed under GNU/GPL v2, see LICENSE.TXT
+ *
+ * http://www.processwire.com
+ * http://www.ryancramer.com
+ *
+ */
+
+class LimitPageTable extends WireData implements Module, ConfigurableModule {
+
+	/**
+	 * Module information
+	 */
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'Limit PageTable',
+			'version' => 4,
+			'summary' => 'Allows "Add New" buttons in a PageTable inputfield to be disabled when a defined limit is reached.',
+			'autoload' => "template=admin",
+		);
+	}
+
+	/**
+	 * Upgrade
+	 */
+	public function ___upgrade($fromVersion, $toVersion) {
+		// Upgrade from < v0.0.4
+		if($fromVersion < 4) {
+			$this->modules->saveConfig($this->className(), array());
+			$this->message('LimitPageTable has new config settings. Please fill out the module config.');
+		}
+	}
+
+	/**
+	 * Initialise
+	 */
+	public function init() {
+		$this->addHookAfter('ProcessPageEdit::execute', $this, 'addJS');
+		$this->addHookBefore('Modules::saveModuleConfigData', $this, 'cleanConfig');
+	}
+
+
+	/**
+	 * Deleted config inputfields are not automatically removed the db
+	 * so clean the config data before it is saved
+	 */
+	public function cleanConfig($event) {
+		$module_name = $event->arguments('className');
+		$config = $event->arguments('configData');
+		if(is_object($module_name)) $module_name = $module_name->className();
+		if($module_name !== $this->className()) return;
+		foreach($config as $key => $value) {
+			$num = filter_var($key, FILTER_SANITIZE_NUMBER_INT);
+			if($num > $config['fieldset_count']) unset($config[$key]);
+		}
+		$event->arguments('configData', $config);
+	}
+
+
+	/**
+	 * Add Javascript
+	 */
+	public function addJS($event) {
+		$settings = array();
+		$settings['addnew_text'] = $this->addnew_text;
+		$this->config->js($this->className(), $settings);
+
+		$info = $this->getModuleInfo();
+		$version = (int) $info['version'];
+		$this->config->scripts->add($this->config->urls->LimitPageTable . "LimitPageTable.js?v={$version}");
+
+		$raw_config =  $this->modules->getModuleConfigData($this->className());
+		unset($raw_config['addnew_text'], $raw_config['fieldset_count']); // we don't need these
+		$config = [];
+		foreach($raw_config as $key => $value) {
+			$num = filter_var($key, FILTER_SANITIZE_NUMBER_INT);
+			$config[$num][$key] = $value;
+		}
+		$call_checkPT = '';
+		foreach($config as $key => $value) {
+			$pt_class = '.Inputfield_' . $config[$key]["pagetable_{$key}"];
+			$tpl = $this->templates->get("name={$config[$key]["tpl_{$key}"]}");
+			$btn_match = '';
+			$table_match = '';
+			if($tpl) {
+				$btn_match = $tpl->label ?: $tpl->name;
+				$table_match = $config[$key]["table_match_{$key}"] === 'label' ? $tpl->label : $tpl->name;
+			}
+			$tpl_limit = $config[$key]["tpl_limit_{$key}"];
+			$call_checkPT .= "checkPT('$pt_class', '$table_match', '$btn_match', '$tpl_limit');";
+		}
+		$js = "
+<script>
+$(function(){
+	$call_checkPT
+	$(document).ajaxComplete(function() {
+		$call_checkPT
+	});
+});
+</script>
+		";
+		$event->return .= $js;
+	}
+
+}
