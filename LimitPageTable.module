@@ -23,7 +23,7 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	public static function getModuleInfo() {
 		return array(
 			'title' => 'Limit PageTable',
-			'version' => 4,
+			'version' => 5,
 			'summary' => 'Allows "Add New" buttons in a PageTable inputfield to be disabled when a defined limit is reached.',
 			'autoload' => "template=admin",
 		);
@@ -70,6 +70,9 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	 * Add Javascript
 	 */
 	public function addJS($event) {
+		// return if ProcessPageEdit is being loaded via AJAX (image field)
+		if($this->config->ajax) return;
+
 		$settings = array();
 		$settings['addnew_text'] = $this->addnew_text;
 		$this->config->js($this->className(), $settings);
