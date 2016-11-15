@@ -68,7 +68,6 @@ class LimitPageTableConfig extends ModuleConfig {
 	 * Make select for PageTable field
 	 */
 	public function makePageTableFieldSelect($identifier = 'x') {
-		$caps_identifier = strtoupper($identifier);
 		$f = $this->modules->get('InputfieldSelect');
 		$f->name = "pagetable_{$identifier}";
 		$f->label = $this->_('PageTable field');
