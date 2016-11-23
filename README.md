@@ -1,6 +1,6 @@
 # LimitPageTable
 
-A module for ProcessWire CMS/CMF. Allows "Add New" buttons in a PageTable inputfield to be disabled when a defined limit is reached.
+A module for ProcessWire CMS/CMF. Allows limits and restrictions to be placed on selected PageTable fields.
 
 ## Usage
 
@@ -11,11 +11,16 @@ For the PageTable field you want to limit, on the "Input" tab include "template"
 In the module config, fill out the fields in the fieldset row:
 
 * PageTable field you want to limit
+* Role that restrictions will apply to
 * Template you want to limit (only needed if your PageTable field allows more than one template)
-* Limit
 * Field you have included in the "Table fields to display in admin" setting (only needed if your PageTable field allows more than one template)
+* Limit
+* Option to prevent drag sorting of items (affects all rows regardless of template)
+* Option to prevent trashing of items (affects all rows regardless of template)
+* Option to disable all "Add" buttons for any template
 
-You can define up to 20 limited PageTable fields – either different fields or different templates for the same field. Use the "Number of limited PageTable fields" field to add rows as needed.
+
+You can add rows as needed using the "Add another row" button.
 
 If you are using translated text for the default PageTable "Add New" button then enter the translation in "Text for default 'Add New' button".
 
