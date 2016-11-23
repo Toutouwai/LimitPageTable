@@ -23,95 +23,475 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	public static function getModuleInfo() {
 		return array(
 			'title' => 'Limit PageTable',
-			'version' => 5,
-			'summary' => 'Allows "Add New" buttons in a PageTable inputfield to be disabled when a defined limit is reached.',
+			'version' => 6,
+			'summary' => 'Allows limits and restrictions to be placed on selected PageTable fields.',
 			'autoload' => "template=admin",
+			'icon' => 'table',
 		);
+	}
+
+	/**
+	 * Install
+	 */
+	public function ___install() {
+		// create one row code to get things started
+		$this->modules->saveModuleConfigData($this->className, array('codes' => uniqid() . '|') );
 	}
 
 	/**
 	 * Upgrade
 	 */
 	public function ___upgrade($fromVersion, $toVersion) {
+
 		// Upgrade from < v0.0.4
 		if($fromVersion < 4) {
-			$this->modules->saveConfig($this->className(), array());
+			// clear the config
+			$this->modules->saveModuleConfigData($this->className(), array());
+			// create one row code to get things started
+			$this->modules->saveModuleConfigData($this->className, array('codes' => uniqid() . '|') );
 			$this->message('LimitPageTable has new config settings. Please fill out the module config.');
 		}
-	}
 
-	/**
-	 * Initialise
-	 */
-	public function init() {
-		$this->addHookAfter('ProcessPageEdit::execute', $this, 'addJS');
-		$this->addHookBefore('Modules::saveModuleConfigData', $this, 'cleanConfig');
-	}
-
-
-	/**
-	 * Deleted config inputfields are not automatically removed the db
-	 * so clean the config data before it is saved
-	 */
-	public function cleanConfig($event) {
-		$module_name = $event->arguments('className');
-		$config = $event->arguments('configData');
-		if(is_object($module_name)) $module_name = $module_name->className();
-		if($module_name !== $this->className()) return;
-		foreach($config as $key => $value) {
-			$num = filter_var($key, FILTER_SANITIZE_NUMBER_INT);
-			if($num > $config['fieldset_count']) unset($config[$key]);
+		// Upgrade from v0.0.5
+		if($fromVersion == 5) {
+			// get existing config
+			$cfg =  $this->modules->getModuleConfigData($this->className());
+			// new config
+			$new_cfg = array();
+			$new_cfg['addnew_text'] = $cfg['addnew_text'];
+			$new_cfg['codes'] = '';
+			unset($cfg['addnew_text'], $cfg['fieldset_count']);
+			// organise old config into groups
+			$cfg_grouped = array();
+			foreach($cfg as $key => $value) {
+				$num = filter_var($key, FILTER_SANITIZE_NUMBER_INT);
+				$cfg_grouped[$num][$key] = $value;
+			}
+			// set new config
+			foreach($cfg_grouped as $key => $value) {
+				if(is_array($value)) {
+					$num = $key;
+					$unique = uniqid();
+					$new_cfg['codes'] .= "$unique|";
+					foreach($value as $key2 => $value2) {
+						$new_cfg[str_replace($num, $unique, $key2)] = $value2;
+					}
+				}
+			}
+			$this->modules->saveModuleConfigData($this->className(), array()); // clear config
+			$this->modules->saveModuleConfigData($this->className, $new_cfg); // save new config
 		}
-		$event->arguments('configData', $config);
 	}
 
-
 	/**
-	 * Add Javascript
+	 * Ready
 	 */
-	public function addJS($event) {
-		// return if ProcessPageEdit is being loaded via AJAX (image field)
-		if($this->config->ajax) return;
-
-		$settings = array();
-		$settings['addnew_text'] = $this->addnew_text;
-		$this->config->js($this->className(), $settings);
-
+	public function ready() {
+		// add css and js for module config page
 		$info = $this->getModuleInfo();
 		$version = (int) $info['version'];
-		$this->config->scripts->add($this->config->urls->LimitPageTable . "LimitPageTable.js?v={$version}");
-
-		$raw_config =  $this->modules->getModuleConfigData($this->className());
-		unset($raw_config['addnew_text'], $raw_config['fieldset_count']); // we don't need these
-		$config = [];
-		foreach($raw_config as $key => $value) {
-			$num = filter_var($key, FILTER_SANITIZE_NUMBER_INT);
-			$config[$num][$key] = $value;
+		$config = $this->config;
+		if($this->input->get->name == $this->className) {
+			$config->styles->add($config->urls->{$this->className} . "module_config.css?v=$version");
+			$config->scripts->add($config->urls->{$this->className} . "module_config.js?v=$version");
 		}
-		$call_checkPT = '';
-		foreach($config as $key => $value) {
-			$pt_class = '.Inputfield_' . $config[$key]["pagetable_{$key}"];
-			$tpl = $this->templates->get("name={$config[$key]["tpl_{$key}"]}");
+
+		// hooks
+		$this->addHookAfter('AdminTheme::getExtraMarkup', $this, 'userBodyClasses');
+		$this->addHookAfter('ProcessPageEdit::execute', $this, 'addScriptStyles');
+		$this->addHookAfter('InputfieldPageTable::render', $this, 'appendToField');
+		$this->addHookBefore('Modules::saveModuleConfigData', $this, 'processConfig');
+	}
+
+	/**
+	 * Adds admin body classes based on $user
+	 */
+	public function userBodyClasses($event) {
+		$object = $event->object;
+		$user = $this->user;
+		foreach($user->roles as $role) {
+			$object->addBodyClass("role-{$role->name}");
+		}
+		if(!$user->isSuperuser()) $object->addBodyClass("role-nonsuperuser");
+		$object->addBodyClass("user-{$user->name}");
+	}
+
+	/**
+	 * Append to rendered Repeater inputfield
+	 */
+	public function appendToField($event) {
+		$inputfield = $event->object;
+		$f_name = $inputfield->name;
+
+		$cfg =  $this->modules->getModuleConfigData($this->className());
+		// early return if field is not in module config
+		if(!in_array($f_name, $cfg)) return;
+
+		$uniques = array();
+		foreach($cfg as $key => $value) {
+			if($value === $f_name) {
+				$uniques[] = substr($key, -13); // last 13 characters are the unique code
+			}
+		}
+		$out = '';
+		$dom_ready = '';
+		$ajax_done = '';
+		$ajax_done_wait = '';
+		$css = '';
+		foreach($uniques as $unique) {
+			if(!$cfg["role_{$unique}"]) continue; // role must not be empty
+			$pt_class = '.Inputfield_' . $cfg["pagetable_{$unique}"];
+			$role_class = $cfg["role_{$unique}"] ? '.' . $cfg["role_{$unique}"] : '';
+			$prefix = "body$role_class $pt_class";
+			$tpl = $this->templates->get("name={$cfg["tpl_{$unique}"]}");
 			$btn_match = '';
 			$table_match = '';
 			if($tpl) {
 				$btn_match = $tpl->label ?: $tpl->name;
-				$table_match = $config[$key]["table_match_{$key}"] === 'label' ? $tpl->label : $tpl->name;
+				$table_match = $cfg["table_match_{$unique}"] === 'label' ? $tpl->label : $tpl->name;
 			}
-			$tpl_limit = $config[$key]["tpl_limit_{$key}"];
-			$call_checkPT .= "checkPT('$pt_class', '$table_match', '$btn_match', '$tpl_limit');";
+			$tpl_limit = $cfg["tpl_limit_{$unique}"];
+			if($cfg["notrash_{$unique}"]) $css .= "$prefix .InputfieldPageTableDelete { display:none !important; }";
+			if($cfg["noadd_{$unique}"]) $css .= "$prefix .InputfieldPageTableAdd button { display:none !important; }";
+			if($cfg["nodrag_{$unique}"]) {
+				$css .= "$prefix td:not(:last-child) { cursor:auto !important; }";
+				$disable_drag = "$('$prefix').find('tbody').sortable('disable');";
+				$dom_ready .= $disable_drag;
+				$ajax_done_wait .= $disable_drag;
+			}
+			$limit = $cfg["tpl_limit_{$unique}"];
+			if($limit) {
+				$call_checkPT = "checkPT('$role_class', '$pt_class', '$table_match', '$btn_match', '$tpl_limit');";
+				$dom_ready .= $call_checkPT;
+				$ajax_done .= $call_checkPT;
+			}
 		}
-		$js = "
+		if($css) $out .= "<style>$css</style>";
+		if($dom_ready || $ajax_done || $ajax_done_wait) $out .= "
 <script>
-$(function(){
-	$call_checkPT
+$(function() {
+	$dom_ready
 	$(document).ajaxComplete(function() {
-		$call_checkPT
+		$ajax_done
+		setTimeout(function() {
+			$ajax_done_wait
+		}, 600);
 	});
 });
 </script>
 		";
-		$event->return .= $js;
+		$event->return .= $out;
+	}
+
+	/**
+	 * Add script and styles
+	 */
+	public function addScriptStyles($event) {
+		// return if ProcessPageEdit is being loaded via AJAX (image field)
+		if($this->config->ajax) return;
+
+		$page = $event->object->getPage();
+		$count = $page->fields->find('type=FieldtypePageTable')->count();
+		if(!$count) return; // early return if no PageTables on this page
+
+		// module config to JS variables
+		$settings = array();
+		$settings['addnew_text'] = $this->addnew_text;
+		$this->config->js($this->className(), $settings);
+
+		// add JS function
+		$config = $this->config;
+		$info = $this->getModuleInfo();
+		$version = (int) $info['version'];
+		$config->scripts->add($config->urls->{$this->className} . "{$this->className}.js?v={$version}");
+
+		// add CSS for hiding "Add New" buttons
+		$event->return .= "<style>.InputfieldPageTableAdd button.button-hide { display:none !important; }</style>";
+	}
+
+	/**
+	 * Process the config data on save
+	 */
+	public function processConfig($event) {
+		$module_name = $event->arguments('className');
+		$cfg = $event->arguments('configData');
+		if(is_object($module_name)) $module_name = $module_name->className();
+		if($module_name !== $this->className()) return;
+
+		// if the "Add another row" button was clicked
+		if($cfg['add_new']) {
+			$cfg['codes'] .= $cfg['unique'] . '|';
+		}
+
+		// if any rows were marked for deletion
+		$delete_codes = array();
+		foreach($cfg as $key => $value) {
+			if (strpos($key, 'delete_') === 0 && $value === 1) {
+				$delete_codes[] = substr($key, -13); // last 13 characters are the unique code;
+			}
+		}
+		if(count($delete_codes)) {
+			foreach($delete_codes as $delete_code) {
+				$cfg['codes'] = str_replace("$delete_code|", '', $cfg['codes']);
+			}
+			foreach($cfg as $key => $value) {
+				if($this->strposa($key, $delete_codes, 0)) {
+					unset($cfg[$key]);
+				}
+			}
+		}
+
+		// return processed config
+		$event->arguments('configData', $cfg);
+	}
+
+	/**
+	 * strpos() with array of strings as needle
+	 */
+	public function strposa($haystack, $needle, $offset=0) {
+		if(!is_array($needle)) $needle = array($needle);
+		foreach($needle as $query) {
+			if(strpos($haystack, $query, $offset) !== false) return true;
+		}
+		return false;
+	}
+
+
+	/**
+	 * Config inputfields
+	 */
+	public function getModuleConfigInputfields() {
+		$inputfields = new InputfieldWrapper();
+
+		$f = $this->modules->get('InputfieldText');
+		$f->name = 'addnew_text';
+		$f->label = $this->_("Text for default 'Add New' button");
+		$f->description = $this->_("If you are using translated text for the default PageTable 'Add New' button then enter the translation here.");
+		$f->value = 'Add New';
+		$inputfields->add($f);
+
+		$inputfields->add( $this->makeCodes() );
+		$inputfields->add( $this->makeUnique() );
+
+		$codes = explode('|', rtrim($this->codes, '|'));
+		$i = 1;
+		foreach($codes as $code) {
+			if(!$code) break;
+			$inputfields->add( $this->makeFieldset($code, $i) );
+			$i++;
+		}
+
+		$inputfields->add( $this->makeAddNew() );
+
+		return $inputfields;
+	}
+
+	/**
+	 * Make codes field
+	 */
+	public function makeCodes() {
+		$f_name = 'codes';
+		$f = $this->modules->get('InputfieldTextarea');
+		$f->name = $f_name;
+		$f->value = $this->$f_name;
+		$f->collapsed = Inputfield::collapsedHidden;
+		return $f;
+	}
+
+	/**
+	 * Make unique field
+	 */
+	public function makeUnique() {
+		$f = $this->modules->get('InputfieldText');
+		$f->name = 'unique';
+		$f->value = uniqid();
+		$f->collapsed = Inputfield::collapsedHidden;
+		return $f;
+	}
+
+	/**
+	 * Make 'Add New' button
+	 */
+	public function makeAddNew() {
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->name = 'add_new';
+		$f->label = $this->_('Add another row');
+		return $f;
+	}
+
+	/**
+	 * Make fieldset
+	 */
+	public function makeFieldset($identifier, $number) {
+		$fieldset = $this->modules->get("InputfieldFieldset");
+		$fieldset->name = "row_{$identifier}";
+		$fieldset->label = $this->_('Limited PageTable') . " $number";
+
+		$f = $this->makePageTableFieldSelect($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeRolesSelect($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeTemplateSelect($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeMatchSelect($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeLimitInteger($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeNoDragCheckbox($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeNoTrashCheckbox($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeNoAddCheckbox($identifier);
+		$fieldset->add($f);
+
+		$f = $this->makeDeleteCheckbox($identifier);
+		$fieldset->add($f);
+
+		return $fieldset;
+	}
+
+	/**
+	 * Make checkbox for row deletion
+	 */
+	public function makeDeleteCheckbox($identifier) {
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->name = "delete_{$identifier}";
+		$f->label = $this->_('Delete');
+		return $f;
+	}
+
+	/**
+	 * Make select for PageTable field
+	 */
+	public function makePageTableFieldSelect($identifier) {
+		$f_name = "pagetable_{$identifier}";
+		$f = $this->modules->get('InputfieldSelect');
+		$f->name = $f_name;
+		$f->label = $this->_('PageTable field');
+		$f->columnWidth = 50;
+		$select_options = $this->fields->find("type=FieldtypePageTable");
+		foreach($select_options as $select_option) {
+			$f->addOption($select_option->name, $select_option->label ?: $select_option->name);
+		}
+		$f->value = $this->$f_name;
+		return $f;
+	}
+
+	/**
+	 * Make select for Role
+	 */
+	public function makeRolesSelect($identifier) {
+		$f_name = "role_{$identifier}";
+		$f = $this->modules->get('InputfieldSelect');
+		$f->name = $f_name;
+		$f->label = $this->_('Role to restrict');
+		$f->columnWidth = 50;
+		$roles = $this->roles->find("name!=guest|superuser");
+		foreach($roles as $select_option) {
+			$f->addOption("role-{$select_option->name}", $select_option->name);
+		}
+		$f->addOption('role-nonsuperuser', 'All non-superuser roles');
+		$f->value = $this->$f_name;
+		return $f;
+	}
+
+	/**
+	 * Make select for template
+	 */
+	public function makeTemplateSelect($identifier) {
+		$f_name = "tpl_{$identifier}";
+		$f = $this->modules->get('InputfieldSelect');
+		$f->name = $f_name;
+		$f->label = $this->_('Template to limit');
+		$f->notes = $this->_('For fields that allow more than one template.');
+		$f->columnWidth = 26;
+		foreach($this->templates as $select_option) {
+			$f->addOption($select_option->name, $select_option->label ?: $select_option->name);
+		}
+		$f->value = $this->$f_name;
+		return $f;
+	}
+
+	/**
+	 * Make select for table match value
+	 */
+	public function makeMatchSelect($identifier) {
+		$f_name = "table_match_{$identifier}";
+		$f = $this->modules->get('InputfieldSelect');
+		$f->name = $f_name;
+		$f->label = $this->_('Match field in table');
+		$f->description = $this->_('I have set this field to display in the table:');
+		$f->notes = $this->_('For fields that allow more than one template.');
+		$f->columnWidth = 26;
+		$f->addOption('name', 'template (Template name)');
+		$f->addOption('label', 'template.label (Template label)');
+		$f->value = $this->$f_name;
+		return $f;
+	}
+
+	/**
+	 * Make integer for limit
+	 */
+	public function makeLimitInteger($identifier) {
+		$f_name = "tpl_limit_{$identifier}";
+		$f = $this->modules->get('InputfieldInteger');
+		$f->name = $f_name;
+		$f->label = $this->_('Limit');
+		$f->inputType = 'number';
+		$f->min = 0;
+		$f->max = 200;
+		$f->columnWidth = 12;
+		$f->value = $this->$f_name;
+		return $f;
+	}
+
+	/**
+	 * Make checkbox for "No Drag" option
+	 */
+	public function makeNoDragCheckbox($identifier) {
+		$f_name = "nodrag_{$identifier}";
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->name = $f_name;
+		$f->label = $this->_('Prevent drag');
+		$f->notes = $this->_('Affects all rows.');
+		$f->columnWidth = 12;
+		$f->attr("checked", $this->$f_name === 1 ? "checked" : "");
+		return $f;
+	}
+
+	/**
+	 * Make checkbox for "No Trash" option
+	 */
+	public function makeNoTrashCheckbox($identifier) {
+		$f_name = "notrash_{$identifier}";
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->name = $f_name;
+		$f->label = $this->_('Prevent trash');
+		$f->notes = $this->_('Affects all rows.');
+		$f->columnWidth = 12;
+		$f->attr("checked", $this->$f_name === 1 ? "checked" : "");
+		return $f;
+	}
+
+	/**
+	 * Make checkbox for "No Add" option
+	 */
+	public function makeNoAddCheckbox($identifier) {
+		$f_name = "noadd_{$identifier}";
+		$f = $this->modules->get('InputfieldCheckbox');
+		$f->name = $f_name;
+		$f->label = $this->_('Prevent add');
+		$f->notes = $this->_("Remove all Add buttons.");
+		$f->columnWidth = 12;
+		$f->attr("checked", $this->$f_name === 1 ? "checked" : "");
+		return $f;
 	}
 
 }
