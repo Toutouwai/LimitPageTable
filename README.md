@@ -24,6 +24,8 @@ You can add rows as needed using the "Add another row" button.
 
 If you are using translated text for the default PageTable "Add New" button then enter the translation in "Text for default 'Add New' button".
 
+Please note that limits and restrictions are applied with CSS/JS so should not be considered tamper-proof.
+
 ## License
 
 Released under Mozilla Public License v2. See file LICENSE for details.
