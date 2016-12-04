@@ -23,7 +23,7 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	public static function getModuleInfo() {
 		return array(
 			'title' => 'Limit PageTable',
-			'version' => 6,
+			'version' => 7,
 			'summary' => 'Allows limits and restrictions to be placed on selected PageTable fields.',
 			'autoload' => "template=admin",
 			'icon' => 'table',
