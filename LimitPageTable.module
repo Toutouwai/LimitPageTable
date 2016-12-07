@@ -23,7 +23,7 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	public static function getModuleInfo() {
 		return array(
 			'title' => 'Limit PageTable',
-			'version' => 7,
+			'version' => 8,
 			'summary' => 'Allows limits and restrictions to be placed on selected PageTable fields.',
 			'autoload' => "template=admin",
 			'icon' => 'table',
@@ -263,11 +263,12 @@ $(function() {
 	public function getModuleConfigInputfields() {
 		$inputfields = new InputfieldWrapper();
 
+		$f_name = 'addnew_text';
 		$f = $this->modules->get('InputfieldText');
-		$f->name = 'addnew_text';
+		$f->name = $f_name;
 		$f->label = $this->_("Text for default 'Add New' button");
 		$f->description = $this->_("If you are using translated text for the default PageTable 'Add New' button then enter the translation here.");
-		$f->value = 'Add New';
+		$f->value = $this->$f_name ?: 'Add New';
 		$inputfields->add($f);
 
 		$inputfields->add( $this->makeCodes() );
@@ -323,7 +324,7 @@ $(function() {
 	 * Make fieldset
 	 */
 	public function makeFieldset($identifier, $number) {
-		$fieldset = $this->modules->get("InputfieldFieldset");
+		$fieldset = $this->modules->get('InputfieldFieldset');
 		$fieldset->name = "row_{$identifier}";
 		$fieldset->label = $this->_('Limited PageTable') . " $number";
 
