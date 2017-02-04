@@ -10,8 +10,8 @@ For the PageTable field you want to limit, on the "Input" tab include "template"
  
 In the module config, fill out the fields in the fieldset row:
 
-* PageTable field you want to limit
-* Role that restrictions will apply to
+* PageTable field you want to limit (required)
+* Roles that restrictions will apply to (required)
 * Template you want to limit (only needed if your PageTable field allows more than one template)
 * Field you have included in the "Table fields to display in admin" setting (only needed if your PageTable field allows more than one template)
 * Limit
