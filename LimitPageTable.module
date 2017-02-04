@@ -23,7 +23,7 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	public static function getModuleInfo() {
 		return array(
 			'title' => 'Limit PageTable',
-			'version' => 8,
+			'version' => 9,
 			'summary' => 'Allows limits and restrictions to be placed on selected PageTable fields.',
 			'autoload' => "template=admin",
 			'icon' => 'table',
@@ -55,7 +55,7 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 		// Upgrade from v0.0.5
 		if($fromVersion == 5) {
 			// get existing config
-			$cfg =  $this->modules->getModuleConfigData($this->className());
+			$cfg = $this->modules->getModuleConfigData($this->className());
 			// new config
 			$new_cfg = array();
 			$new_cfg['addnew_text'] = $cfg['addnew_text'];
@@ -80,6 +80,20 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 			}
 			$this->modules->saveModuleConfigData($this->className(), array()); // clear config
 			$this->modules->saveModuleConfigData($this->className, $new_cfg); // save new config
+		}
+
+		// Upgrade from < v0.0.9
+		if($fromVersion < 9) {
+			// get existing config
+			$cfg = $this->modules->getModuleConfigData($this->className());
+			// convert roles field value to array
+			foreach($cfg as $key => $value) {
+				if(substr($key, 0, 4) === "role") {
+					$cfg[$key] = array($value);
+				}
+			}
+			// save config
+			$this->modules->saveModuleConfigData($this->className, $cfg);
 		}
 	}
 
@@ -109,11 +123,10 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	public function userBodyClasses($event) {
 		$object = $event->object;
 		$user = $this->user;
+		if(!$user->isSuperuser()) $object->addBodyClass('role-nonsuperuser');
 		foreach($user->roles as $role) {
 			$object->addBodyClass("role-{$role->name}");
 		}
-		if(!$user->isSuperuser()) $object->addBodyClass("role-nonsuperuser");
-		$object->addBodyClass("user-{$user->name}");
 	}
 
 	/**
@@ -121,15 +134,15 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	 */
 	public function appendToField($event) {
 		$inputfield = $event->object;
-		$f_name = $inputfield->name;
+		$if_name = $inputfield->name;
 
-		$cfg =  $this->modules->getModuleConfigData($this->className());
+		$cfg = $this->modules->getModuleConfigData($this->className());
 		// early return if field is not in module config
-		if(!in_array($f_name, $cfg)) return;
+		if(!in_array($if_name, $cfg)) return;
 
 		$uniques = array();
 		foreach($cfg as $key => $value) {
-			if($value === $f_name) {
+			if($value === $if_name) {
 				$uniques[] = substr($key, -13); // last 13 characters are the unique code
 			}
 		}
@@ -139,31 +152,32 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 		$ajax_done_wait = '';
 		$css = '';
 		foreach($uniques as $unique) {
-			if(!$cfg["role_{$unique}"]) continue; // role must not be empty
-			$pt_class = '.Inputfield_' . $cfg["pagetable_{$unique}"];
-			$role_class = $cfg["role_{$unique}"] ? '.' . $cfg["role_{$unique}"] : '';
-			$prefix = "body$role_class $pt_class";
-			$tpl = $this->templates->get("name={$cfg["tpl_{$unique}"]}");
-			$btn_match = '';
-			$table_match = '';
-			if($tpl) {
-				$btn_match = $tpl->label ?: $tpl->name;
-				$table_match = $cfg["table_match_{$unique}"] === 'label' ? $tpl->label : $tpl->name;
-			}
-			$tpl_limit = $cfg["tpl_limit_{$unique}"];
-			if($cfg["notrash_{$unique}"]) $css .= "$prefix .InputfieldPageTableDelete { display:none !important; }";
-			if($cfg["noadd_{$unique}"]) $css .= "$prefix .InputfieldPageTableAdd button { display:none !important; }";
-			if($cfg["nodrag_{$unique}"]) {
-				$css .= "$prefix td:not(:last-child) { cursor:auto !important; }";
-				$disable_drag = "$('$prefix').find('tbody').sortable('disable');";
-				$dom_ready .= $disable_drag;
-				$ajax_done_wait .= $disable_drag;
-			}
-			$limit = $cfg["tpl_limit_{$unique}"];
-			if($limit) {
-				$call_checkPT = "checkPT('$role_class', '$pt_class', '$table_match', '$btn_match', '$tpl_limit');";
-				$dom_ready .= $call_checkPT;
-				$ajax_done .= $call_checkPT;
+			if (!$cfg["role_{$unique}"]) continue; // role must not be empty
+			foreach ($cfg["role_{$unique}"] as $role) {
+				$role_class = $role === 'role-all' ? '' : ".$role";
+				$prefix = "body$role_class .Inputfield_{$if_name}";
+				$tpl = $this->templates->get("name={$cfg["tpl_{$unique}"]}");
+				$btn_match = '';
+				$table_match = '';
+				if ($tpl) {
+					$btn_match = $tpl->label ?: $tpl->name;
+					$table_match = $cfg["table_match_{$unique}"] === 'label' ? $tpl->label : $tpl->name;
+				}
+				$tpl_limit = $cfg["tpl_limit_{$unique}"];
+				if ($cfg["notrash_{$unique}"]) $css .= "$prefix .InputfieldPageTableDelete { display:none !important; }";
+				if ($cfg["noadd_{$unique}"]) $css .= "$prefix .InputfieldPageTableAdd button { display:none !important; }";
+				if ($cfg["nodrag_{$unique}"]) {
+					$css .= "$prefix td:not(:last-child) { cursor:auto !important; }";
+					$disable_drag = "$('$prefix').find('tbody').sortable('disable');";
+					$dom_ready .= $disable_drag;
+					$ajax_done_wait .= $disable_drag;
+				}
+				$limit = $cfg["tpl_limit_{$unique}"];
+				if ($limit) {
+					$call_checkPT = "checkPT('$role_class', '.Inputfield_{$if_name}', '$table_match', '$btn_match', '$tpl_limit');";
+					$dom_ready .= $call_checkPT;
+					$ajax_done .= $call_checkPT;
+				}
 			}
 		}
 		if($css) $out .= "<style>$css</style>";
@@ -376,8 +390,10 @@ $(function() {
 		$f = $this->modules->get('InputfieldSelect');
 		$f->name = $f_name;
 		$f->label = $this->_('PageTable field');
+		$f->required = true;
 		$f->columnWidth = 50;
 		$select_options = $this->fields->find("type=FieldtypePageTable");
+		$f->addOption(''); // first item blank
 		foreach($select_options as $select_option) {
 			$f->addOption($select_option->name, $select_option->label ?: $select_option->name);
 		}
@@ -386,19 +402,21 @@ $(function() {
 	}
 
 	/**
-	 * Make select for Role
+	 * Make AsmSelect for roles
 	 */
 	public function makeRolesSelect($identifier) {
 		$f_name = "role_{$identifier}";
-		$f = $this->modules->get('InputfieldSelect');
+		$f = $this->modules->get('InputfieldAsmSelect');
 		$f->name = $f_name;
 		$f->label = $this->_('Role to restrict');
+		$f->required = true;
 		$f->columnWidth = 50;
-		$roles = $this->roles->find("name!=guest|superuser");
+		$roles = $this->roles->find("name!=guest");
 		foreach($roles as $select_option) {
 			$f->addOption("role-{$select_option->name}", $select_option->name);
 		}
-		$f->addOption('role-nonsuperuser', 'All non-superuser roles');
+		$f->addOption('role-nonsuperuser', $this->_('All non-superuser roles'));
+		$f->addOption('role-all', $this->_('All roles'));
 		$f->value = $this->$f_name;
 		return $f;
 	}
