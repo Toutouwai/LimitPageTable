@@ -25,6 +25,7 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 			'title' => 'Limit PageTable',
 			'version' => 9,
 			'summary' => 'Allows limits and restrictions to be placed on selected PageTable fields.',
+			'author' => 'Robin Sallis',
 			'autoload' => "template=admin",
 			'icon' => 'table',
 		);
@@ -103,7 +104,7 @@ class LimitPageTable extends WireData implements Module, ConfigurableModule {
 	public function ready() {
 		// add css and js for module config page
 		$info = $this->getModuleInfo();
-		$version = (int) $info['version'];
+		$version = $info['version'];
 		$config = $this->config;
 		if($this->input->get->name == $this->className) {
 			$config->styles->add($config->urls->{$this->className} . "module_config.css?v=$version");
